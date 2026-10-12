@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SwiftShare - P2P 파일 전송</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS CDN -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+            background-color: #f8fafc;
+        }
+        .drag-active {
+            border-color: #4f46e5 !important;
+            background-color: #eef2ff !important;
+        }
+        .animate-pulse-slow {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .6; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col text-slate-800">
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-40">
+        <div class="max-w-3xl mx-auto px-4 py-3.5 flex items-center justify-between">
+            <div class="flex items-center gap-2.5 cursor-pointer" onclick="resetToHome()">
+                <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-lg font-black shadow-sm">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </div>
+                <span class="text-lg font-extrabold text-slate-900 tracking-tight">SwiftShare</span>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button onclick="resetToHome()" class="text-xs font-semibold text-slate-500 hover:text-slate-800 bg-slate-100 px-3 py-1.5 rounded-lg transition">
+                    <i class="fa-solid fa-rotate-left mr-1"></i>처음으로
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-2xl w-full mx-auto p-4 sm:p-6 flex flex-col justify-center">
+
+        <!-- Mode Toggle Tabs (Send / Receive) -->
+        <div class="bg-slate-200/80 p-1 rounded-2xl flex w-full mb-6 shadow-inner">
+            <button id="tabSendBtn" onclick="switchTab('send')" class="flex-1 py-3 rounded-xl font-bold text-sm transition-all shadow-sm bg-white text-indigo-600">
+                <i class="fa-solid fa-upload mr-2"></i>보내기
+            </button>
+            <button id="tabReceiveBtn" onclick="switchTab('receive')" class="flex-1 py-3 rounded-xl font-bold text-sm transition-all text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-download mr-2"></i>받기
+            </button>
+        </div>
+
+        <!-- ================= SEND SECTION ================= -->
+        <div id="sendSection" class="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-lg shadow-slate-100/50 w-full transition-all">
+            
+            <!-- Step 1: File Dropzone & Selection -->
+            <div id="sendStep1">
+                <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-slate-50/60 hover:bg-indigo-50/40 rounded-2xl p-8 sm:p-12 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[220px]">
+                    <input type="file" id="fileInput" multiple class="hidden" onchange="handleFileSelect(event)">
+                    <div class="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mb-3 shadow-inner">
+                        <i class="fa-solid fa-file-circle-plus"></i>
+                    </div>
+                    <p class="text-base font-bold text-slate-800">파일 여러 개 선택 또는 드래그 앤 드롭</p>
+                    <p class="text-xs text-slate-400 mt-1">대용량 파일 및 다중 파일 동시 선택 가능</p>
+                </div>
+            </div>
+
+            <!-- Step 2: Selected Files List & Code Display -->
+            <div id="sendStep2" class="hidden flex-col items-center text-center">
+                
+                <!-- File List Container -->
+                <div class="w-full bg-slate-50 border border-slate-200/80 rounded-2xl p-4 mb-6">
+                    <div class="flex items-center justify-between pb-3 border-b border-slate-200/80 mb-3">
+                        <span class="text-xs font-bold text-slate-600">선택한 파일 (<span id="fileCountText">0</span>개)</span>
+                        <span id="totalSizeText" class="text-xs font-bold text-indigo-600">0 MB</span>
+                    </div>
+
+                    <div id="selectedFilesList" class="max-h-40 overflow-y-auto space-y-2 text-left pr-1">
+                        <!-- Dynamic File Cards Insertion -->
+                    </div>
+
+                    <div class="mt-3 pt-2 border-t border-slate-200/60 flex justify-end">
+                        <button onclick="document.getElementById('fileInput').click()" class="text-xs font-bold text-indigo-600 hover:text-indigo-800">
+                            <i class="fa-solid fa-plus mr-1"></i>파일 더 추가하기
+                        </button>
+                    </div>
+                </div>
+
+                <p class="text-xs font-semibold text-slate-400 mb-2">상대방 기기에 입력할 6자리 코드</p>
+                
+                <!-- 6-Digit Code Display -->
+                <div class="flex items-center justify-center gap-2 my-1">
+                    <div id="transferCodeDisplay" class="text-4xl sm:text-5xl font-black text-indigo-600 tracking-widest bg-indigo-50 border-2 border-indigo-200/80 px-6 py-3 rounded-2xl font-mono shadow-inner">
+                        ------
+                    </div>
+                    <button onclick="copyTransferCode()" class="bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-2xl transition active:scale-95" title="코드 복사">
+                        <i class="fa-solid fa-copy text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Status Waiting Indicator -->
+                <div class="mt-6 flex items-center gap-2 text-slate-500 text-xs font-semibold animate-pulse-slow">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                    상대방 기기 연결 대기 중...
+                </div>
+
+                <!-- Cancel / Reset Button -->
+                <button onclick="resetSendState()" class="mt-6 text-xs text-slate-400 font-semibold hover:text-slate-600 transition">
+                    <i class="fa-solid fa-xmark mr-1"></i>취소하고 새로 선택
+                </button>
+            </div>
+
+            <!-- Step 3: Transfer Progress View -->
+            <div id="sendStep3" class="hidden flex-col items-center text-center">
+                <div id="sendTransferIcon" class="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mb-3 animate-bounce">
+                    <i class="fa-solid fa-arrow-up-from-bracket"></i>
+                </div>
+                
+                <h3 id="sendTransferTitle" class="text-lg font-bold text-slate-800">파일 전송 중...</h3>
+                <p id="sendCurrentFileText" class="text-xs font-bold text-indigo-600 my-1">1 / 3 파일 전송 중</p>
+
+                <!-- Overall Progress Bar -->
+                <div class="w-full bg-slate-100 rounded-full h-3.5 overflow-hidden border border-slate-200 p-0.5 mb-2 mt-3">
+                    <div id="sendProgressBar" class="bg-indigo-600 h-full rounded-full transition-all duration-200 w-0"></div>
+                </div>
+
+                <div class="flex justify-between w-full text-xs font-bold text-slate-600 mt-1 mb-6">
+                    <span id="sendProgressPercent">0%</span>
+                    <span id="sendTransferSpeed">0 MB/s</span>
+                </div>
+
+                <!-- Send Another Batch Button (No Refresh Required) -->
+                <button id="sendAnotherBtn" onclick="resetSendState()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-2xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 text-sm">
+                    <i class="fa-solid fa-plus"></i> 다른 파일 또 보내기
+                </button>
+            </div>
+        </div>
+
+        <!-- ================= RECEIVE SECTION ================= -->
+        <div id="receiveSection" class="hidden bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-lg shadow-slate-100/50 w-full transition-all">
+            
+            <div id="receiveStep1" class="flex flex-col items-center text-center">
+                <div class="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mb-3">
+                    <i class="fa-solid fa-key"></i>
+                </div>
+                <h3 class="text-lg font-bold text-slate-900">전송 코드 6자리 입력</h3>
+                <p class="text-xs text-slate-400 mt-1 mb-5">보내는 기기에 표시된 숫자 코드를 입력하세요</p>
+
+                <div class="w-full max-w-xs mb-5">
+                    <input type="text" id="codeInput" maxlength="6" placeholder="123456" 
+                           class="w-full text-center text-3xl font-black font-mono tracking-widest px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-indigo-500 focus:bg-white focus:outline-none uppercase transition"
+                           onkeyup="if(event.key === 'Enter') startReceive()">
+                </div>
+
+                <button onclick="startReceive()" class="w-full max-w-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-2xl shadow-md transition active:scale-95 flex items-center justify-center gap-2 text-sm">
+                    <i class="fa-solid fa-download"></i> 수신 시작
+                </button>
+            </div>
+
+            <!-- Receive Step 2: Receiving Progress & Received Files List -->
+            <div id="receiveStep2" class="hidden flex-col items-center text-center">
+                <div id="receiveIcon" class="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mb-3 animate-bounce">
+                    <i class="fa-solid fa-arrow-down-to-bracket"></i>
+                </div>
+                <h3 id="receiveTitleText" class="text-lg font-bold text-slate-800">파일 수신 중...</h3>
+                <p id="receiveCurrentFileText" class="text-xs font-bold text-indigo-600 my-1">파일 수신 준비 중...</p>
+
+                <div class="w-full bg-slate-100 rounded-full h-3.5 overflow-hidden border border-slate-200 p-0.5 mb-2 mt-3">
+                    <div id="receiveProgressBar" class="bg-emerald-500 h-full rounded-full transition-all duration-200 w-0"></div>
+                </div>
+
+                <div class="flex justify-between w-full text-xs font-bold text-slate-600 mt-1 mb-6">
+                    <span id="receiveProgressPercent">0%</span>
+                    <span id="receiveTransferSpeed">0 MB/s</span>
+                </div>
+
+                <!-- Download Files Container -->
+                <div class="w-full bg-slate-50 border border-slate-200/80 rounded-2xl p-4 mb-4 text-left">
+                    <p class="text-xs font-bold text-slate-600 mb-2">받은 파일 목록</p>
+                    <div id="receivedFilesList" class="max-h-48 overflow-y-auto space-y-2 pr-1">
+                        <!-- Received File Cards -->
+                    </div>
+                </div>
+
+                <button onclick="resetReceiveState()" class="text-xs text-slate-400 font-bold hover:text-slate-600 transition mt-2">
+                    <i class="fa-solid fa-rotate-left mr-1"></i>다른 파일 받기
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        let selectedFiles = [];
+        let peer = null;
+        let dataConn = null;
+        let transferCode = '';
+        const CHUNK_SIZE = 16384; // 16KB WebRTC chunk
+
+        let receivedBatchMeta = null;
+        let currentReceiveIndex = 0;
+        let receivedChunks = [];
+        let receivedSize = 0;
+        let startTime = 0;
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            const bgClass = type === 'error' ? 'bg-rose-600' : (type === 'success' ? 'bg-emerald-600' : 'bg-slate-800');
+            
+            toast.className = `${bgClass} text-white px-4 py-3 rounded-xl shadow-lg text-xs sm:text-sm font-semibold flex items-center gap-2 pointer-events-auto transition-all transform duration-300 translate-y-2 opacity-0`;
+            toast.innerHTML = `<i class="fa-solid fa-circle-info"></i> ${message}`;
+            
+            container.appendChild(toast);
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function switchTab(tab) {
+            const sendBtn = document.getElementById('tabSendBtn');
+            const receiveBtn = document.getElementById('tabReceiveBtn');
+            const sendSec = document.getElementById('sendSection');
+            const receiveSec = document.getElementById('receiveSection');
+
+            if (tab === 'send') {
+                sendBtn.className = "flex-1 py-3 rounded-xl font-bold text-sm transition-all shadow-sm bg-white text-indigo-600";
+                receiveBtn.className = "flex-1 py-3 rounded-xl font-bold text-sm transition-all text-slate-600 hover:text-slate-900";
+                sendSec.classList.remove('hidden');
+                receiveSec.classList.add('hidden');
+            } else {
+                receiveBtn.className = "flex-1 py-3 rounded-xl font-bold text-sm transition-all shadow-sm bg-white text-indigo-600";
+                sendBtn.className = "flex-1 py-3 rounded-xl font-bold text-sm transition-all text-slate-600 hover:text-slate-900";
+                receiveSec.classList.remove('hidden');
+                sendSec.classList.add('hidden');
+            }
+        }
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.add('drag-active');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('drag-active');
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            if (dt.files.length > 0) {
+                addFiles(Array.from(dt.files));
+            }
+        });
+
+        function handleFileSelect(e) {
+            if (e.target.files.length > 0) {
+                addFiles(Array.from(e.target.files));
+            }
+        }
+
+        function addFiles(filesArray) {
+            selectedFiles = [...selectedFiles, ...filesArray];
+            renderSelectedFilesList();
+
+            document.getElementById('sendStep1').classList.add('hidden');
+            document.getElementById('sendStep2').classList.remove('hidden');
+            document.getElementById('sendStep2').classList.add('flex');
+
+            if (!peer) {
+                generateCodeAndInitPeer();
+            }
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            if (selectedFiles.length === 0) {
+                resetSendState();
+            } else {
+                renderSelectedFilesList();
+            }
+        }
+
+        function renderSelectedFilesList() {
+            const listEl = document.getElementById('selectedFilesList');
+            listEl.innerHTML = '';
+
+            let totalBytes = 0;
+
+            selectedFiles.forEach((file, idx) => {
+                totalBytes += file.size;
+                const card = document.createElement('div');
+                card.className = "flex items-center justify-between bg-white border border-slate-200/80 p-2.5 rounded-xl shadow-sm text-xs";
+                card.innerHTML = `
+                    <div class="flex items-center gap-2 overflow-hidden mr-2">
+                        <i class="fa-solid fa-file text-indigo-500"></i>
+                        <span class="font-semibold text-slate-800 truncate">${file.name}</span>
+                        <span class="text-slate-400 text-[10px]">(${formatBytes(file.size)})</span>
+                    </div>
+                    <button onclick="removeFile(${idx})" class="text-slate-400 hover:text-rose-500 p-1">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                `;
+                listEl.appendChild(card);
+            });
+
+            document.getElementById('fileCountText').innerText = selectedFiles.length;
+            document.getElementById('totalSizeText').innerText = formatBytes(totalBytes);
+        }
+
+        function generateCodeAndInitPeer() {
+            transferCode = Math.floor(100000 + Math.random() * 900000).toString();
+            document.getElementById('transferCodeDisplay').innerText = transferCode;
+
+            const peerId = `swiftshare-${transferCode}`;
+
+            if (dataConn) {
+                try { dataConn.close(); } catch(e){}
+                dataConn = null;
+            }
+            if (peer) {
+                try { peer.destroy(); } catch(e){}
+                peer = null;
+            }
+
+            peer = new Peer(peerId);
+
+            peer.on('open', (id) => {
+                console.log('Sender Peer ready:', id);
+            });
+
+            peer.on('connection', (conn) => {
+                dataConn = conn;
+                showToast('상대방 기기가 연결되었습니다!', 'success');
+                setupSenderConnection();
+            });
+
+            peer.on('error', (err) => {
+                if (err.type === 'unavailable-id') {
+                    generateCodeAndInitPeer();
+                } else {
+                    showToast('연결 생성 실패. 다시 시도해 주세요.', 'error');
+                }
+            });
+        }
+
+        function setupSenderConnection() {
+            document.getElementById('sendStep2').classList.add('hidden');
+            document.getElementById('sendStep3').classList.remove('hidden');
+            document.getElementById('sendStep3').classList.add('flex');
+
+            document.getElementById('sendTransferTitle').innerText = '파일 전송 중...';
+            document.getElementById('sendTransferIcon').className = 'w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mb-3 animate-bounce';
+            document.getElementById('sendTransferIcon').innerHTML = '<i class="fa-solid fa-arrow-up-from-bracket"></i>';
+
+            dataConn.on('open', () => {
+                // Send batch metadata
+                const metaList = selectedFiles.map((f, i) => ({ id: i, name: f.name, size: f.size, type: f.type }));
+                dataConn.send({
+                    type: 'batch-start',
+                    totalFiles: selectedFiles.length,
+                    totalSize: selectedFiles.reduce((acc, f) => acc + f.size, 0),
+                    files: metaList
+                });
+
+                sendBatchFilesSequentially(0);
+            });
+        }
+
+        function sendBatchFilesSequentially(fileIndex) {
+            if (fileIndex >= selectedFiles.length) {
+                // Entire batch complete
+                dataConn.send({ type: 'batch-end' });
+                showToast('모든 파일 전송 완료!', 'success');
+
+                document.getElementById('sendTransferTitle').innerText = '전송 완료!';
+                document.getElementById('sendCurrentFileText').innerText = `총 ${selectedFiles.length}개 파일 전달 성공`;
+                document.getElementById('sendTransferIcon').className = 'w-14 h-14 bg-emerald-500 text-white rounded-2xl flex items-center justify-center text-2xl mb-3 shadow-md shadow-emerald-200';
+                document.getElementById('sendTransferIcon').innerHTML = '<i class="fa-solid fa-check"></i>';
+                return;
+            }
+
+            const currentFile = selectedFiles[fileIndex];
+            document.getElementById('sendCurrentFileText').innerText = `[${fileIndex + 1} / ${selectedFiles.length}] ${currentFile.name}`;
+
+            dataConn.send({
+                type: 'file-start',
+                index: fileIndex,
+                name: currentFile.name,
+                size: currentFile.size
+            });
+
+            let offset = 0;
+            const fileReader = new FileReader();
+            startTime = Date.now();
+
+            fileReader.onload = (e) => {
+                if (!dataConn || !dataConn.open) return;
+
+                dataConn.send({
+                    type: 'chunk',
+                    index: fileIndex,
+                    data: e.target.result
+                });
+
+                offset += e.target.result.byteLength;
+
+                const fileProgress = Math.min(100, Math.round((offset / currentFile.size) * 100));
+                const elapsedTime = (Date.now() - startTime) / 1000;
+                const speed = elapsedTime > 0 ? (offset / (1024 * 1024)) / elapsedTime : 0;
+
+                document.getElementById('sendProgressBar').style.width = `${fileProgress}%`;
+                document.getElementById('sendProgressPercent').innerText = `${fileProgress}%`;
+                document.getElementById('sendTransferSpeed').innerText = `${speed.toFixed(2)} MB/s`;
+
+                if (offset < currentFile.size) {
+                    if (dataConn.dataChannel && dataConn.dataChannel.bufferedAmount > 1024 * 1024) {
+                        setTimeout(readNextChunk, 50);
+                    } else {
+                        readNextChunk();
+                    }
+                } else {
+                    dataConn.send({ type: 'file-end', index: fileIndex });
+                    setTimeout(() => sendBatchFilesSequentially(fileIndex + 1), 100);
+                }
+            };
+
+            function readNextChunk() {
+                const slice = currentFile.slice(offset, offset + CHUNK_SIZE);
+                fileReader.readAsArrayBuffer(slice);
+            }
+
+            readNextChunk();
+        }
+
+        function startReceive() {
+            const codeInput = document.getElementById('codeInput').value.trim();
+            if (codeInput.length !== 6 || isNaN(codeInput)) {
+                showToast('올바른 6자리 코드를 입력해 주세요.', 'error');
+                return;
+            }
+
+            const targetPeerId = `swiftshare-${codeInput}`;
+
+            if (dataConn) {
+                try { dataConn.close(); } catch(e){}
+                dataConn = null;
+            }
+            if (peer) {
+                try { peer.destroy(); } catch(e){}
+                peer = null;
+            }
+
+            peer = new Peer();
+
+            peer.on('open', () => {
+                showToast('연결 시도 중...', 'info');
+                dataConn = peer.connect(targetPeerId, { reliable: true });
+
+                dataConn.on('open', () => {
+                    showToast('연결 성공! 수신 준비 중...', 'success');
+                    document.getElementById('receiveStep1').classList.add('hidden');
+                    document.getElementById('receiveStep2').classList.remove('hidden');
+                    document.getElementById('receiveStep2').classList.add('flex');
+                    document.getElementById('receivedFilesList').innerHTML = '';
+                });
+
+                dataConn.on('data', (data) => {
+                    handleIncomingData(data);
+                });
+            });
+
+            peer.on('error', () => {
+                showToast('코드가 올바르지 않거나 연결이 해제되었습니다.', 'error');
+            });
+        }
+
+        function handleIncomingData(data) {
+            if (data.type === 'batch-start') {
+                receivedBatchMeta = data;
+                currentReceiveIndex = 0;
+            } else if (data.type === 'file-start') {
+                receivedChunks = [];
+                receivedSize = 0;
+                startTime = Date.now();
+                const currentMeta = receivedBatchMeta.files[data.index];
+                document.getElementById('receiveCurrentFileText').innerText = `[${data.index + 1} / ${receivedBatchMeta.totalFiles}] ${currentMeta.name}`;
+            } else if (data.type === 'chunk') {
+                receivedChunks.push(data.data);
+                receivedSize += data.data.byteLength;
+
+                const currentMeta = receivedBatchMeta.files[data.index];
+                const progress = Math.min(100, Math.round((receivedSize / currentMeta.size) * 100));
+                const elapsedTime = (Date.now() - startTime) / 1000;
+                const speed = elapsedTime > 0 ? (receivedSize / (1024 * 1024)) / elapsedTime : 0;
+
+                document.getElementById('receiveProgressBar').style.width = `${progress}%`;
+                document.getElementById('receiveProgressPercent').innerText = `${progress}%`;
+                document.getElementById('receiveTransferSpeed').innerText = `${speed.toFixed(2)} MB/s`;
+
+            } else if (data.type === 'file-end') {
+                const currentMeta = receivedBatchMeta.files[data.index];
+                const blob = new Blob(receivedChunks, { type: currentMeta.type || 'application/octet-stream' });
+                const downloadUrl = URL.createObjectURL(blob);
+
+                addReceivedFileCard(currentMeta.name, currentMeta.size, downloadUrl);
+
+            } else if (data.type === 'batch-end') {
+                document.getElementById('receiveTitleText').innerText = '모든 파일 수신 완료!';
+                document.getElementById('receiveCurrentFileText').innerText = `총 ${receivedBatchMeta.totalFiles}개 수신됨`;
+                document.getElementById('receiveIcon').className = 'w-14 h-14 bg-emerald-500 text-white rounded-2xl flex items-center justify-center text-2xl mb-3 shadow-md shadow-emerald-200';
+                document.getElementById('receiveIcon').innerHTML = '<i class="fa-solid fa-check"></i>';
+                showToast('모든 파일이 도착했습니다!', 'success');
+            }
+        }
+
+        function addReceivedFileCard(fileName, fileSize, downloadUrl) {
+            const listEl = document.getElementById('receivedFilesList');
+            const card = document.createElement('div');
+            card.className = "flex items-center justify-between bg-white border border-slate-200/80 p-2.5 rounded-xl shadow-sm text-xs";
+            card.innerHTML = `
+                <div class="flex items-center gap-2 overflow-hidden mr-2">
+                    <i class="fa-solid fa-file-arrow-down text-emerald-500"></i>
+                    <span class="font-semibold text-slate-800 truncate">${fileName}</span>
+                    <span class="text-slate-400 text-[10px]">(${formatBytes(fileSize)})</span>
+                </div>
+                <a href="${downloadUrl}" download="${fileName}" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1 shrink-0">
+                    <i class="fa-solid fa-download"></i> 저장
+                </a>
+            `;
+            listEl.appendChild(card);
+        }
+
+        function resetSendState() {
+            if (dataConn) {
+                try { dataConn.close(); } catch(e){}
+                dataConn = null;
+            }
+            if (peer) {
+                try { peer.destroy(); } catch(e){}
+                peer = null;
+            }
+
+            selectedFiles = [];
+            document.getElementById('fileInput').value = '';
+            document.getElementById('sendProgressBar').style.width = '0%';
+            document.getElementById('sendProgressPercent').innerText = '0%';
+            document.getElementById('sendTransferSpeed').innerText = '0 MB/s';
+
+            document.getElementById('sendStep1').classList.remove('hidden');
+            document.getElementById('sendStep2').classList.add('hidden');
+            document.getElementById('sendStep3').classList.add('hidden');
+
+            showToast('새로 파일을 선택해 주세요.', 'info');
+        }
+
+        function resetReceiveState() {
+            if (dataConn) {
+                try { dataConn.close(); } catch(e){}
+                dataConn = null;
+            }
+            if (peer) {
+                try { peer.destroy(); } catch(e){}
+                peer = null;
+            }
+
+            receivedBatchMeta = null;
+            receivedChunks = [];
+            receivedSize = 0;
+
+            document.getElementById('codeInput').value = '';
+            document.getElementById('receiveProgressBar').style.width = '0%';
+            document.getElementById('receiveProgressPercent').innerText = '0%';
+            document.getElementById('receiveTransferSpeed').innerText = '0 MB/s';
+
+            document.getElementById('receiveStep1').classList.remove('hidden');
+            document.getElementById('receiveStep2').classList.add('hidden');
+        }
+
+        function resetToHome() {
+            resetSendState();
+            resetReceiveState();
+            switchTab('send');
+        }
+
+        function copyTransferCode() {
+            navigator.clipboard.writeText(transferCode);
+            showToast('6자리 코드가 복사되었습니다.', 'success');
+        }
+
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            if (code && code.length === 6) {
+                switchTab('receive');
+                document.getElementById('codeInput').value = code;
+                showToast(`코드(${code})가 입력되었습니다.`, 'info');
+            }
+        };
+    </script>
+</body>
+</html>
