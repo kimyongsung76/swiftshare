@@ -15,8 +15,7 @@
         <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-1">
           <span>⚡</span> SwiftShare
         </h1>
-        <!-- 버전 표시 태그 (v1.0.4) -->
-        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.4</span>
+        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.5</span>
       </div>
       <p class="text-xs text-slate-500 mt-1">100% P2P 초고속 무제한 파일 전송</p>
     </div>
@@ -162,14 +161,13 @@
 
       peer = new Peer('swift-' + code, peerConfig);
 
-      // 서버 등록 완결 시점 처리
-      peer.on('open', (id) => {
+      peer.on('open', () => {
         statusEl.innerText = '✅ 준비 완료! 받는 기기에서 코드를 입력하세요.';
       });
 
       peer.on('connection', (c) => {
         conn = c;
-        statusEl.innerText = '🔗 상대방 접속 감지! 데이터 통로 개설 중...';
+        statusEl.innerText = '🔗 상대방 접속 감지! 데이터 통로 연결 중...';
 
         const startSending = () => {
           statusEl.innerText = '⚡ 연결 성공! 파일 전송 시작...';
@@ -183,7 +181,7 @@
         }
       });
 
-      peer.on('error', (err) => {
+      peer.on('error', () => {
         statusEl.innerText = '❌ 서버 등록 실패: 다시 시도해 주세요.';
       });
     }
@@ -245,7 +243,9 @@
 
       peer.on('open', () => {
         statusEl.innerText = '🔎 보내는 기기 찾아 연결 시도 중...';
-        conn = peer.connect('swift-' + code);
+        
+        // iOS Safari 호환을 위한 직렬화 비활성화 설정 (핵심 보완)
+        conn = peer.connect('swift-' + code, { serialization: 'none' });
 
         const startReceivingUI = () => {
           statusEl.innerText = '⚡ 연결 성공! 파일을 받아오는 중...';
