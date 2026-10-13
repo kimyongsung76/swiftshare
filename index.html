@@ -82,9 +82,8 @@
     let conn = null;
     let selectedFiles = [];
     let receivedBlobs = [];
-    const CHUNK_SIZE = 16 * 1024;
+    const CHUNK_SIZE = 16 * 1024; // 16KB iOS 최적화 규격
 
-    // 구글 공용 STUN 서버 명시적 지정 (NAT 방화벽 우회)
     const peerConfig = {
       config: {
         iceServers: [
@@ -143,50 +142,50 @@
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       document.getElementById('send-code').innerText = code;
       document.getElementById('send-code-container').classList.remove('hidden');
-      document.getElementById('send-status').innerText = '보낼 준비 중... (상대방 대기)';
+      document.getElementById('send-status').innerText = '상대방의 연결을 기다리는 중...';
 
       peer = new Peer('swift-' + code, peerConfig);
-
-      peer.on('open', () => {
-        document.getElementById('send-status').innerText = '상대방의 연결을 기다리는 중...';
-      });
 
       peer.on('connection', (c) => {
         conn = c;
         document.getElementById('send-status').innerText = '상대방과 연결되었습니다! 전송 시작...';
         conn.on('open', () => sendFilesSequential());
       });
-
-      peer.on('error', (err) => {
-        document.getElementById('send-status').innerText = '연결 오류 발생. 다시 시도해 주세요.';
-      });
     }
 
+    // iOS 호환 바이너리 직접 전송
     async function sendFilesSequential() {
       showProgress(true);
-      conn.send({ type: 'HEADER', count: selectedFiles.length });
+      
+      // 파일 개수 알림
+      conn.send(JSON.stringify({ type: 'HEADER', count: selectedFiles.length }));
 
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
         document.getElementById('progress-title').innerText = `[${i+1}/${selectedFiles.length}] ${file.name}`;
         
-        conn.send({ type: 'FILE_START', name: file.name, size: file.size, mime: file.type });
+        // 개별 파일 메타데이터 전달 (JSON)
+        conn.send(JSON.stringify({ type: 'FILE_START', name: file.name, size: file.size, mime: file.type }));
 
         let offset = 0;
         while (offset < file.size) {
           const chunk = file.slice(offset, offset + CHUNK_SIZE);
           const buffer = await chunk.arrayBuffer();
-          conn.send({ type: 'CHUNK', data: buffer });
+          
+          // 순수 ArrayBuffer 직렬화 없이 바로 전송 (iOS Safari 지원 필수)
+          conn.send(buffer);
           offset += CHUNK_SIZE;
 
           const pct = Math.min(100, Math.round((offset / file.size) * 100));
           updateProgress(pct);
 
-          if (conn.dataChannel && conn.dataChannel.bufferedAmount > 64 * 1024) {
-            await new Promise(r => setTimeout(r, 20));
+          // iOS 버퍼 오버플로우 방지
+          if (conn.dataChannel && conn.dataChannel.bufferedAmount > 32 * 1024) {
+            await new Promise(r => setTimeout(r, 15));
           }
         }
-        conn.send({ type: 'FILE_END' });
+        
+        conn.send(JSON.stringify({ type: 'FILE_END' }));
       }
 
       document.getElementById('send-status').innerText = '✅ 모든 파일 전송 완료!';
@@ -213,21 +212,12 @@
 
       const statusEl = document.getElementById('receive-status');
       document.getElementById('receive-status-container').classList.remove('hidden');
-      statusEl.innerText = '서버 연결 중...';
+      statusEl.innerText = '보내는 기기에 연결 시도 중...';
 
       peer.on('open', () => {
-        statusEl.innerText = '보내는 기기에 연결 시도 중...';
         conn = peer.connect('swift-' + code, { reliable: true });
 
-        // 10초 타임아웃 처리
-        const connectTimeout = setTimeout(() => {
-          if (!conn || !conn.open) {
-            statusEl.innerText = '❌ 연결 실패: 코드 번호를 확인하거나 보내는 기기의 화면이 켜져 있는지 확인하세요.';
-          }
-        }, 10000);
-
         conn.on('open', () => {
-          clearTimeout(connectTimeout);
           statusEl.innerText = '연결 성공! 파일을 받아오는 중...';
           showProgress(true);
         });
@@ -238,33 +228,40 @@
         let fileCount = 0;
 
         conn.on('data', (data) => {
-          if (data.type === 'HEADER') {
-            fileCount = data.count;
-            receivedBlobs = [];
-          } else if (data.type === 'FILE_START') {
-            currentFile = data;
-            fileChunks = [];
-            receivedBytes = 0;
-            document.getElementById('progress-title').innerText = `수신 중: ${data.name}`;
-          } else if (data.type === 'CHUNK') {
-            fileChunks.push(data.data);
-            receivedBytes += data.data.byteLength;
-            const pct = Math.min(100, Math.round((receivedBytes / currentFile.size) * 100));
-            updateProgress(pct);
-          } else if (data.type === 'FILE_END') {
-            const blob = new Blob(fileChunks, { type: currentFile.mime || 'application/octet-stream' });
-            receivedBlobs.push({ name: currentFile.name, blob: blob });
-            addReceivedFileUI(currentFile.name, blob);
+          // 1. JSON 제어 메시지 수신 시
+          if (typeof data === 'string') {
+            const msg = JSON.parse(data);
+            if (msg.type === 'HEADER') {
+              fileCount = msg.count;
+              receivedBlobs = [];
+            } else if (msg.type === 'FILE_START') {
+              currentFile = msg;
+              fileChunks = [];
+              receivedBytes = 0;
+              document.getElementById('progress-title').innerText = `수신 중: ${msg.name}`;
+            } else if (msg.type === 'FILE_END') {
+              const blob = new Blob(fileChunks, { type: currentFile.mime || 'application/octet-stream' });
+              receivedBlobs.push({ name: currentFile.name, blob: blob });
+              addReceivedFileUI(currentFile.name, blob);
 
-            if (receivedBlobs.length === fileCount) {
-              statusEl.innerText = '🎉 모든 파일 수신 완료!';
-              document.getElementById('btn-download-all').classList.remove('hidden');
+              if (receivedBlobs.length === fileCount) {
+                statusEl.innerText = '🎉 모든 파일 수신 완료!';
+                document.getElementById('btn-download-all').classList.remove('hidden');
+              }
+            }
+          } 
+          // 2. 순수 순차 이진 데이터(ArrayBuffer) 수신 시 (아이폰 호환 완벽 구동)
+          else {
+            fileChunks.push(data);
+            receivedBytes += data.byteLength || data.size || 0;
+            if (currentFile && currentFile.size) {
+              const pct = Math.min(100, Math.round((receivedBytes / currentFile.size) * 100));
+              updateProgress(pct);
             }
           }
         });
 
         conn.on('error', () => {
-          clearTimeout(connectTimeout);
           statusEl.innerText = '❌ 연결 중 오류가 발생했습니다.';
         });
       });
