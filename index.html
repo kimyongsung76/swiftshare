@@ -84,12 +84,27 @@
     let receivedBlobs = [];
     const CHUNK_SIZE = 16 * 1024;
 
+    // STUN 및 TURN(릴레이) 서버 설정 (iOS mDNS/NAT 차단 우회)
     const peerConfig = {
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' }
+          { urls: 'stun:openrelay.metered.ca:80' },
+          {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelay',
+            credential: 'openrelay'
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelay',
+            credential: 'openrelay'
+          },
+          {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelay',
+            credential: 'openrelay'
+          }
         ]
       }
     };
@@ -149,11 +164,17 @@
 
       peer.on('connection', (c) => {
         conn = c;
-        // 실제 데이터 통로(DataChannel)가 개설된 시점에 수신 준비 완료
-        conn.on('open', () => {
-          document.getElementById('send-status').innerText = '연결 완료! 파일 전송 중...';
+
+        const startSending = () => {
+          document.getElementById('send-status').innerText = '연결 성공! 파일 전송 시작...';
           sendFilesSequential();
-        });
+        };
+
+        if (conn.open) {
+          startSending();
+        } else {
+          conn.on('open', startSending);
+        }
       });
     }
 
@@ -213,13 +234,18 @@
       statusEl.innerText = '보내는 기기에 연결 시도 중...';
 
       peer.on('open', () => {
-        // iOS WebKit 호환성을 위해 옵션 객체 없이 기본 연결 생성
         conn = peer.connect('swift-' + code);
 
-        conn.on('open', () => {
+        const startReceivingUI = () => {
           statusEl.innerText = '연결 성공! 파일을 받아오는 중...';
           showProgress(true);
-        });
+        };
+
+        if (conn.open) {
+          startReceivingUI();
+        } else {
+          conn.on('open', startReceivingUI);
+        }
 
         let currentFile = null;
         let fileChunks = [];
