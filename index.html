@@ -15,7 +15,7 @@
         <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-1">
           <span>⚡</span> SwiftShare
         </h1>
-        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.6</span>
+        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.7</span>
       </div>
       <p class="text-xs text-slate-500 mt-1">100% P2P 초고속 무제한 파일 전송</p>
     </div>
@@ -85,26 +85,13 @@
     let conn = null;
     let selectedFiles = [];
     let receivedBlobs = [];
-    const CHUNK_SIZE = 16 * 1024; // 16KB 안전 규격
+    const CHUNK_SIZE = 16 * 1024;
 
-    // 다중 STUN/TURN 보장 레벨 설정
     const peerConfig = {
       config: {
         iceServers: [
           { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:openrelay.metered.ca:80' },
-          {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelay',
-            credential: 'openrelay'
-          },
-          {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelay',
-            credential: 'openrelay'
-          }
+          { urls: 'stun:stun1.l.google.com:19302' }
         ]
       }
     };
@@ -183,7 +170,6 @@
       });
     }
 
-    // ArrayBuffer를 iOS 호환 Base64 문자열로 변환
     function arrayBufferToBase64(buffer) {
       let binary = '';
       const bytes = new Uint8Array(buffer);
@@ -194,7 +180,6 @@
       return window.btoa(binary);
     }
 
-    // Base64 문자열을 ArrayBuffer로 복원
     function base64ToArrayBuffer(base64) {
       const binaryString = window.atob(base64);
       const len = binaryString.length;
@@ -264,8 +249,8 @@
       peer.on('open', () => {
         statusEl.innerText = '🔎 보내는 기기 연결 시도 중...';
         
-        // PeerJS 기본 JSON 직렬화 옵션으로 통일 (iOS WebKit 100% 호환)
-        conn = peer.connect('swift-' + code, { serialization: 'json', reliable: true });
+        // 옵션 없이 기본 순수 WebRTC 통로로 연결 (iOS Safari 필수)
+        conn = peer.connect('swift-' + code);
 
         conn.on('open', () => {
           statusEl.innerText = '⚡ 연결 성공! 파일 수신 시작...';
