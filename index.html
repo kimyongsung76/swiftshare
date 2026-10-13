@@ -37,7 +37,7 @@
       <div id="send-code-container" class="hidden text-center bg-indigo-50 p-4 rounded-xl mb-4 border border-indigo-100">
         <p class="text-xs text-indigo-600 font-medium mb-1">받는 기기에서 입력할 6자리 코드</p>
         <div id="send-code" class="text-3xl font-extrabold tracking-widest text-indigo-700 my-1">------</div>
-        <p id="send-status" class="text-xs text-slate-500 mt-2">상대방 연결 대기 중...</p>
+        <p id="send-status" class="text-xs text-slate-500 mt-2">시그널링 서버 연결 중...</p>
       </div>
 
       <button id="btn-reset-send" onclick="resetSend()" class="hidden w-full py-3 bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-300 transition">
@@ -82,9 +82,17 @@
     let conn = null;
     let selectedFiles = [];
     let receivedBlobs = [];
-    
-    // iOS 버퍼 안정성을 위한 16KB Chunk 크기 설정
-    const CHUNK_SIZE = 16 * 1024; 
+    const CHUNK_SIZE = 16 * 1024;
+
+    // 구글 공용 STUN 서버 명시적 지정 (NAT 방화벽 우회)
+    const peerConfig = {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
+    };
 
     function switchMode(mode) {
       document.getElementById('section-send').classList.toggle('hidden', mode !== 'send');
@@ -121,7 +129,7 @@
       const container = document.getElementById('file-list');
       container.innerHTML = '';
       container.classList.remove('hidden');
-      selectedFiles.forEach((f, idx) => {
+      selectedFiles.forEach((f) => {
         container.innerHTML += `
           <div class="flex justify-between items-center bg-slate-100 p-2 rounded-lg text-xs">
             <span class="truncate max-w-[200px] text-slate-700">${f.name}</span>
@@ -135,17 +143,25 @@
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       document.getElementById('send-code').innerText = code;
       document.getElementById('send-code-container').classList.remove('hidden');
+      document.getElementById('send-status').innerText = '보낼 준비 중... (상대방 대기)';
 
-      peer = new Peer('swift-' + code);
+      peer = new Peer('swift-' + code, peerConfig);
+
+      peer.on('open', () => {
+        document.getElementById('send-status').innerText = '상대방의 연결을 기다리는 중...';
+      });
 
       peer.on('connection', (c) => {
         conn = c;
-        document.getElementById('send-status').innerText = '연결됨! 파일 전송 중...';
+        document.getElementById('send-status').innerText = '상대방과 연결되었습니다! 전송 시작...';
         conn.on('open', () => sendFilesSequential());
+      });
+
+      peer.on('error', (err) => {
+        document.getElementById('send-status').innerText = '연결 오류 발생. 다시 시도해 주세요.';
       });
     }
 
-    // iOS 버퍼 대기(Backpressure) 적용 파일 전송 함수
     async function sendFilesSequential() {
       showProgress(true);
       conn.send({ type: 'HEADER', count: selectedFiles.length });
@@ -166,7 +182,6 @@
           const pct = Math.min(100, Math.round((offset / file.size) * 100));
           updateProgress(pct);
 
-          // iOS 버퍼 과부하 방지: 데이터 채널 버퍼가 쌓이면 잠시 대기
           if (conn.dataChannel && conn.dataChannel.bufferedAmount > 64 * 1024) {
             await new Promise(r => setTimeout(r, 20));
           }
@@ -189,29 +204,38 @@
       fileInput.value = '';
     }
 
-    // 수신부 처리
     function connectAndReceive() {
       const code = document.getElementById('receive-code').value.trim();
       if (code.length !== 6) return alert('6자리 숫자를 입력하세요.');
 
       if (peer) peer.destroy();
-      peer = new Peer();
+      peer = new Peer(peerConfig);
 
+      const statusEl = document.getElementById('receive-status');
       document.getElementById('receive-status-container').classList.remove('hidden');
-      document.getElementById('receive-status').innerText = '보내는 기기에 연결 중...';
+      statusEl.innerText = '서버 연결 중...';
 
       peer.on('open', () => {
-        conn = peer.connect('swift-' + code);
-        
+        statusEl.innerText = '보내는 기기에 연결 시도 중...';
+        conn = peer.connect('swift-' + code, { reliable: true });
+
+        // 10초 타임아웃 처리
+        const connectTimeout = setTimeout(() => {
+          if (!conn || !conn.open) {
+            statusEl.innerText = '❌ 연결 실패: 코드 번호를 확인하거나 보내는 기기의 화면이 켜져 있는지 확인하세요.';
+          }
+        }, 10000);
+
+        conn.on('open', () => {
+          clearTimeout(connectTimeout);
+          statusEl.innerText = '연결 성공! 파일을 받아오는 중...';
+          showProgress(true);
+        });
+
         let currentFile = null;
         let fileChunks = [];
         let receivedBytes = 0;
         let fileCount = 0;
-
-        conn.on('open', () => {
-          document.getElementById('receive-status').innerText = '연결 성공! 전송 대기 중...';
-          showProgress(true);
-        });
 
         conn.on('data', (data) => {
           if (data.type === 'HEADER') {
@@ -233,11 +257,20 @@
             addReceivedFileUI(currentFile.name, blob);
 
             if (receivedBlobs.length === fileCount) {
-              document.getElementById('receive-status').innerText = '🎉 모든 파일 수신 완료!';
+              statusEl.innerText = '🎉 모든 파일 수신 완료!';
               document.getElementById('btn-download-all').classList.remove('hidden');
             }
           }
         });
+
+        conn.on('error', () => {
+          clearTimeout(connectTimeout);
+          statusEl.innerText = '❌ 연결 중 오류가 발생했습니다.';
+        });
+      });
+
+      peer.on('error', (err) => {
+        statusEl.innerText = '❌ 코드를 찾을 수 없거나 연결할 수 없습니다.';
       });
     }
 
