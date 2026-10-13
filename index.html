@@ -9,24 +9,20 @@
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col justify-between p-4">
   <div class="max-w-md mx-auto w-full bg-white rounded-2xl shadow-lg p-6 my-auto border border-slate-100">
-    <!-- Header with Version Display -->
     <div class="text-center mb-6">
       <div class="flex items-center justify-center gap-2">
-        <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-1">
-          <span>⚡</span> SwiftShare
-        </h1>
-        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.7</span>
+        <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-1"><span>⚡</span> SwiftShare</h1>
+        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.8</span>
       </div>
       <p class="text-xs text-slate-500 mt-1">100% P2P 초고속 무제한 파일 전송</p>
     </div>
 
-    <!-- Mode Selector -->
     <div class="flex bg-slate-100 p-1 rounded-xl mb-6">
       <button id="tab-send" onclick="switchMode('send')" class="flex-1 py-2 font-medium rounded-lg text-sm transition bg-white text-indigo-600 shadow-sm">보내기</button>
       <button id="tab-receive" onclick="switchMode('receive')" class="flex-1 py-2 font-medium rounded-lg text-sm transition text-slate-500">받기</button>
     </div>
 
-    <!-- Send Section -->
+    <!-- Send -->
     <div id="section-send">
       <div id="drop-zone" class="border-2 border-dashed border-slate-300 rounded-xl p-6 text-center bg-slate-50 hover:bg-slate-100 transition cursor-pointer mb-4">
         <input type="file" id="file-input" multiple class="hidden" onchange="handleFileSelect(event)">
@@ -34,45 +30,34 @@
         <p class="text-sm font-semibold text-slate-700">클릭하거나 파일을 여기에 드롭하세요</p>
         <p class="text-xs text-slate-400 mt-1">여러 개 파일 선택 가능</p>
       </div>
-
       <div id="file-list" class="hidden mb-4 max-h-40 overflow-y-auto space-y-2 pr-1"></div>
-
       <div id="send-code-container" class="hidden text-center bg-indigo-50 p-4 rounded-xl mb-4 border border-indigo-100">
         <p class="text-xs text-indigo-600 font-medium mb-1">받는 기기에서 입력할 6자리 코드</p>
         <div id="send-code" class="text-3xl font-extrabold tracking-widest text-indigo-700 my-1">------</div>
         <p id="send-status" class="text-xs text-slate-500 mt-2">⏳ 연결 코드 생성 중...</p>
+        <p id="send-debug" class="text-[10px] text-slate-400 mt-1 font-mono"></p>
       </div>
-
-      <button id="btn-reset-send" onclick="resetSend()" class="hidden w-full py-3 bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-300 transition">
-        ➕ 다른 파일 또 보내기
-      </button>
+      <button id="btn-reset-send" onclick="resetSend()" class="hidden w-full py-3 bg-slate-200 text-slate-700 font-semibold rounded-xl text-sm hover:bg-slate-300 transition">➕ 다른 파일 또 보내기</button>
     </div>
 
-    <!-- Receive Section -->
+    <!-- Receive -->
     <div id="section-receive" class="hidden">
       <div class="mb-4">
         <label class="block text-xs font-medium text-slate-600 mb-1">6자리 전송 코드 입력</label>
-        <input type="number" id="receive-code" placeholder="123456" class="w-full text-center text-2xl font-bold tracking-widest p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+        <input type="number" inputmode="numeric" id="receive-code" placeholder="123456" class="w-full text-center text-2xl font-bold tracking-widest p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none">
       </div>
-      <button onclick="connectAndReceive()" class="w-full py-3 bg-indigo-600 text-white font-semibold rounded-xl text-sm hover:bg-indigo-700 transition mb-4">
-        파일 전송받기
-      </button>
-
+      <button onclick="connectAndReceive()" class="w-full py-3 bg-indigo-600 text-white font-semibold rounded-xl text-sm hover:bg-indigo-700 transition mb-4">파일 전송받기</button>
       <div id="receive-status-container" class="hidden text-center bg-slate-50 p-4 rounded-xl border border-slate-200 mb-4">
         <p id="receive-status" class="text-xs text-slate-600">연결 시도 중...</p>
+        <p id="receive-debug" class="text-[10px] text-slate-400 mt-1 font-mono"></p>
       </div>
-
       <div id="received-files-list" class="hidden space-y-2 max-h-40 overflow-y-auto pr-1 mb-4"></div>
-      <button id="btn-download-all" onclick="downloadAllFiles()" class="hidden w-full py-3 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 transition">
-        📦 전체 파일 한 번에 다운로드
-      </button>
+      <button id="btn-download-all" onclick="downloadAllFiles()" class="hidden w-full py-3 bg-emerald-600 text-white font-semibold rounded-xl text-sm hover:bg-emerald-700 transition">📦 전체 파일 한 번에 다운로드</button>
     </div>
 
-    <!-- Progress Bar -->
     <div id="progress-container" class="hidden mt-4">
       <div class="flex justify-between text-xs text-slate-500 mb-1">
-        <span id="progress-title">전송 중...</span>
-        <span id="progress-percent">0%</span>
+        <span id="progress-title">전송 중...</span><span id="progress-percent">0%</span>
       </div>
       <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
         <div id="progress-bar" class="bg-indigo-600 h-full w-0 transition-all duration-150"></div>
@@ -86,57 +71,99 @@
     let selectedFiles = [];
     let receivedBlobs = [];
     const CHUNK_SIZE = 16 * 1024;
+    const CONNECT_TIMEOUT_MS = 20000;
+
+    // ▼▼▼ 직접 발급받은 TURN 정보로 교체하세요 (Metered 무료 가입, Cloudflare TURN, 자체 coturn 등) ▼▼▼
+    //   - 3478/UDP가 막힌 망(회사망·일부 LTE)을 위해 443/TCP(가능하면 turns:)를 꼭 포함
+    const TURN_SERVERS = [
+      // { urls: 'turn:YOUR_HOST:80',                     username: 'USER', credential: 'PASS' },
+      // { urls: 'turn:YOUR_HOST:443?transport=tcp',      username: 'USER', credential: 'PASS' },
+      // { urls: 'turns:YOUR_HOST:443?transport=tcp',     username: 'USER', credential: 'PASS' },
+    ];
+    // ▲▲▲
+
+    // ?relay=1 을 붙이면 TURN만 사용 → TURN 서버가 살아있는지 단독 테스트
+    const FORCE_RELAY = new URLSearchParams(location.search).get('relay') === '1';
 
     const peerConfig = {
       config: {
         iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
+          { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+          ...TURN_SERVERS
+        ],
+        iceTransportPolicy: FORCE_RELAY ? 'relay' : 'all'
       }
     };
+
+    // ===== WebRTC 진단: 어느 단계에서 막히는지 화면에 표시 =====
+    function attachDiagnostics(c, debugEl, statusEl, side) {
+      const pc = c.peerConnection;
+      if (!pc) { debugEl.innerText = 'pc 없음'; return () => {}; }
+      const counts = { host: 0, srflx: 0, relay: 0, prflx: 0 };
+      const render = () => {
+        debugEl.innerText =
+          `ICE:${pc.iceConnectionState} · 수집:${pc.iceGatheringState} · ` +
+          `host ${counts.host} / srflx ${counts.srflx} / relay ${counts.relay}` +
+          (FORCE_RELAY ? ' · [relay 강제]' : '');
+      };
+      // PeerJS가 on* 핸들러를 쓰므로 덮어쓰지 않고 addEventListener 사용
+      pc.addEventListener('icecandidate', (e) => {
+        if (e.candidate && e.candidate.candidate) {
+          const m = e.candidate.candidate.match(/ typ (\w+)/);
+          if (m && counts[m[1]] !== undefined) counts[m[1]]++;
+        }
+        render();
+      });
+      pc.addEventListener('icegatheringstatechange', render);
+      pc.addEventListener('iceconnectionstatechange', () => {
+        render();
+        if (pc.iceConnectionState === 'failed') {
+          statusEl.innerText = counts.relay === 0
+            ? '❌ P2P 경로 실패 (TURN 후보 0개) — TURN 서버 설정이 필요합니다.'
+            : '❌ P2P 경로 실패 — 네트워크(방화벽)를 확인하세요.';
+        }
+      });
+      render();
+
+      const timer = setTimeout(() => {
+        if (!c.open) {
+          statusEl.innerText = `⌛ ${CONNECT_TIMEOUT_MS / 1000}초 내 통로 생성 실패 (ICE: ${pc.iceConnectionState}). ` +
+            (counts.relay === 0 ? 'TURN 후보가 없습니다.' : '방화벽/NAT 문제일 수 있습니다.');
+        }
+      }, CONNECT_TIMEOUT_MS);
+      return () => clearTimeout(timer);
+    }
 
     function switchMode(mode) {
       document.getElementById('section-send').classList.toggle('hidden', mode !== 'send');
       document.getElementById('section-receive').classList.toggle('hidden', mode !== 'receive');
-      document.getElementById('tab-send').className = mode === 'send' 
-        ? 'flex-1 py-2 font-medium rounded-lg text-sm transition bg-white text-indigo-600 shadow-sm'
-        : 'flex-1 py-2 font-medium rounded-lg text-sm transition text-slate-500';
-      document.getElementById('tab-receive').className = mode === 'receive'
-        ? 'flex-1 py-2 font-medium rounded-lg text-sm transition bg-white text-indigo-600 shadow-sm'
-        : 'flex-1 py-2 font-medium rounded-lg text-sm transition text-slate-500';
+      const on = 'flex-1 py-2 font-medium rounded-lg text-sm transition bg-white text-indigo-600 shadow-sm';
+      const off = 'flex-1 py-2 font-medium rounded-lg text-sm transition text-slate-500';
+      document.getElementById('tab-send').className = mode === 'send' ? on : off;
+      document.getElementById('tab-receive').className = mode === 'receive' ? on : off;
     }
 
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
-
     dropZone.addEventListener('click', () => fileInput.click());
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-indigo-500'));
     dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('border-indigo-500');
+      e.preventDefault(); dropZone.classList.remove('border-indigo-500');
       if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
     });
-
     function handleFileSelect(e) { if (e.target.files.length) handleFiles(e.target.files); }
-
-    function handleFiles(files) {
-      selectedFiles = Array.from(files);
-      renderFileList();
-      initSender();
-    }
+    function handleFiles(files) { selectedFiles = Array.from(files); renderFileList(); initSender(); }
 
     function renderFileList() {
       const container = document.getElementById('file-list');
-      container.innerHTML = '';
-      container.classList.remove('hidden');
+      container.innerHTML = ''; container.classList.remove('hidden');
       selectedFiles.forEach((f) => {
-        container.innerHTML += `
-          <div class="flex justify-between items-center bg-slate-100 p-2 rounded-lg text-xs">
-            <span class="truncate max-w-[200px] text-slate-700">${f.name}</span>
-            <span class="text-slate-400">${(f.size / (1024*1024)).toFixed(2)} MB</span>
-          </div>`;
+        const div = document.createElement('div');
+        div.className = 'flex justify-between items-center bg-slate-100 p-2 rounded-lg text-xs';
+        div.innerHTML = `<span class="truncate max-w-[200px] text-slate-700"></span><span class="text-slate-400">${(f.size/(1024*1024)).toFixed(2)} MB</span>`;
+        div.firstChild.textContent = f.name;
+        container.appendChild(div);
       });
     }
 
@@ -145,81 +172,61 @@
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       document.getElementById('send-code').innerText = code;
       document.getElementById('send-code-container').classList.remove('hidden');
-      
       const statusEl = document.getElementById('send-status');
-      statusEl.innerText = '⏳ 연결 코드 등록 중...';
+      const debugEl = document.getElementById('send-debug');
+      statusEl.innerText = '⏳ 연결 코드 등록 중...'; debugEl.innerText = '';
 
       peer = new Peer('swift-' + code, peerConfig);
-
-      peer.on('open', () => {
-        statusEl.innerText = '✅ 대기 중! 받는 기기에서 코드를 입력하세요.';
-      });
+      peer.on('open', () => { statusEl.innerText = '✅ 대기 중! 받는 기기에서 코드를 입력하세요.'; });
 
       peer.on('connection', (c) => {
         conn = c;
         statusEl.innerText = '🔗 상대방 접속! 통로 생성 중...';
-
-        conn.on('open', () => {
+        const stopTimer = attachDiagnostics(c, debugEl, statusEl, 'send');
+        c.on('open', () => {
+          stopTimer();
           statusEl.innerText = '⚡ 통로 연결 성공! 파일 전송 시작...';
           sendFilesSequential();
         });
+        c.on('error', (err) => { statusEl.innerText = '❌ 데이터 채널 오류: ' + (err && err.type || err); });
+        c.on('close', () => { if (!c.open) debugEl.innerText += ' · 닫힘'; });
       });
 
-      peer.on('error', () => {
-        statusEl.innerText = '❌ 코드 등록 실패: 파일 선택을 다시 해주세요.';
-      });
+      peer.on('error', (err) => { statusEl.innerText = '❌ 오류(' + err.type + '): 파일 선택을 다시 해주세요.'; });
+      // iOS는 백그라운드 전환 시 시그널링 소켓이 끊김 → 복귀 시 재연결
+      peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
     }
 
     function arrayBufferToBase64(buffer) {
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      const len = bytes.byteLength;
-      for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      return window.btoa(binary);
+      const bytes = new Uint8Array(buffer); let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(binary);
     }
-
     function base64ToArrayBuffer(base64) {
-      const binaryString = window.atob(base64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      const s = atob(base64); const bytes = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
       return bytes.buffer;
     }
 
     async function sendFilesSequential() {
       showProgress(true);
       conn.send({ type: 'HEADER', count: selectedFiles.length });
-
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
         document.getElementById('progress-title').innerText = `[${i+1}/${selectedFiles.length}] ${file.name}`;
-        
         conn.send({ type: 'FILE_START', name: file.name, size: file.size, mime: file.type });
-
         let offset = 0;
         while (offset < file.size) {
-          const chunk = file.slice(offset, offset + CHUNK_SIZE);
-          const buffer = await chunk.arrayBuffer();
-          const base64Data = arrayBufferToBase64(buffer);
-          
-          conn.send({ type: 'CHUNK', data: base64Data });
+          const buffer = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+          conn.send({ type: 'CHUNK', data: arrayBufferToBase64(buffer) });
           offset += CHUNK_SIZE;
-
-          const pct = Math.min(100, Math.round((offset / file.size) * 100));
-          updateProgress(pct);
-
-          if (conn.dataChannel && conn.dataChannel.bufferedAmount > 32 * 1024) {
-            await new Promise(r => setTimeout(r, 15));
+          updateProgress(Math.min(100, Math.round((offset / file.size) * 100)));
+          while (conn.dataChannel && conn.dataChannel.bufferedAmount > 256 * 1024) {
+            await new Promise(r => setTimeout(r, 10));
           }
         }
-        
         conn.send({ type: 'FILE_END' });
       }
-
       document.getElementById('send-status').innerText = '🎉 모든 파일 전송 완료!';
       document.getElementById('btn-reset-send').classList.remove('hidden');
     }
@@ -231,104 +238,73 @@
       document.getElementById('file-list').classList.add('hidden');
       document.getElementById('send-code-container').classList.add('hidden');
       document.getElementById('btn-reset-send').classList.add('hidden');
-      showProgress(false);
-      fileInput.value = '';
+      showProgress(false); fileInput.value = '';
     }
 
     function connectAndReceive() {
       const code = document.getElementById('receive-code').value.trim();
       if (code.length !== 6) return alert('6자리 숫자를 입력하세요.');
-
       if (peer) peer.destroy();
       peer = new Peer(peerConfig);
 
       const statusEl = document.getElementById('receive-status');
+      const debugEl = document.getElementById('receive-debug');
       document.getElementById('receive-status-container').classList.remove('hidden');
-      statusEl.innerText = '📡 서버 연결 중...';
+      statusEl.innerText = '📡 서버 연결 중...'; debugEl.innerText = '';
 
       peer.on('open', () => {
         statusEl.innerText = '🔎 보내는 기기 연결 시도 중...';
-        
-        // 옵션 없이 기본 순수 WebRTC 통로로 연결 (iOS Safari 필수)
-        conn = peer.connect('swift-' + code);
+        conn = peer.connect('swift-' + code, { serialization: 'json', reliable: true });
+        const stopTimer = attachDiagnostics(conn, debugEl, statusEl, 'recv');
 
-        conn.on('open', () => {
-          statusEl.innerText = '⚡ 연결 성공! 파일 수신 시작...';
-          showProgress(true);
-        });
+        conn.on('open', () => { stopTimer(); statusEl.innerText = '⚡ 연결 성공! 파일 수신 시작...'; showProgress(true); });
 
-        let currentFile = null;
-        let fileChunks = [];
-        let receivedBytes = 0;
-        let fileCount = 0;
-
+        let currentFile = null, fileChunks = [], receivedBytes = 0, fileCount = 0;
         conn.on('data', (data) => {
-          if (data.type === 'HEADER') {
-            fileCount = data.count;
-            receivedBlobs = [];
-          } else if (data.type === 'FILE_START') {
-            currentFile = data;
-            fileChunks = [];
-            receivedBytes = 0;
+          if (data.type === 'HEADER') { fileCount = data.count; receivedBlobs = []; }
+          else if (data.type === 'FILE_START') {
+            currentFile = data; fileChunks = []; receivedBytes = 0;
             document.getElementById('progress-title').innerText = `수신 중: ${data.name}`;
           } else if (data.type === 'CHUNK') {
             const buffer = base64ToArrayBuffer(data.data);
-            fileChunks.push(buffer);
-            receivedBytes += buffer.byteLength;
-            if (currentFile && currentFile.size) {
-              const pct = Math.min(100, Math.round((receivedBytes / currentFile.size) * 100));
-              updateProgress(pct);
-            }
+            fileChunks.push(buffer); receivedBytes += buffer.byteLength;
+            if (currentFile && currentFile.size) updateProgress(Math.min(100, Math.round((receivedBytes / currentFile.size) * 100)));
           } else if (data.type === 'FILE_END') {
             const blob = new Blob(fileChunks, { type: currentFile.mime || 'application/octet-stream' });
-            receivedBlobs.push({ name: currentFile.name, blob: blob });
+            receivedBlobs.push({ name: currentFile.name, blob });
             addReceivedFileUI(currentFile.name, blob);
-
             if (receivedBlobs.length === fileCount) {
               statusEl.innerText = '🎉 모든 파일 수신 완료!';
               document.getElementById('btn-download-all').classList.remove('hidden');
             }
           }
         });
-
-        conn.on('error', () => {
-          statusEl.innerText = '❌ 연결 중 오류가 발생했습니다.';
-        });
+        conn.on('error', (err) => { statusEl.innerText = '❌ 연결 오류: ' + (err && err.type || err); });
       });
 
       peer.on('error', (err) => {
-        if (err.type === 'peer-unavailable') {
-          statusEl.innerText = '❌ 코드를 찾을 수 없습니다. 보내는 기기에 [대기 중]이 떠있는지 확인하세요.';
-        } else {
-          statusEl.innerText = '❌ 코드를 찾을 수 없거나 연결 실패했습니다.';
-        }
+        statusEl.innerText = err.type === 'peer-unavailable'
+          ? '❌ 코드를 찾을 수 없습니다. 보내는 기기에 [대기 중]이 떠있는지 확인하세요.'
+          : '❌ 연결 실패 (' + err.type + ')';
       });
     }
 
     function addReceivedFileUI(fileName, blob) {
       const container = document.getElementById('received-files-list');
       container.classList.remove('hidden');
-      const url = URL.createObjectURL(blob);
-
       const div = document.createElement('div');
       div.className = 'flex justify-between items-center bg-slate-100 p-2 rounded-lg text-xs';
-      div.innerHTML = `
-        <span class="truncate max-w-[180px] font-medium text-slate-700">${fileName}</span>
-        <a href="${url}" download="${fileName}" class="px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-semibold">저장</a>
-      `;
-      container.appendChild(div);
+      const name = document.createElement('span');
+      name.className = 'truncate max-w-[180px] font-medium text-slate-700'; name.textContent = fileName;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = fileName; a.textContent = '저장';
+      a.className = 'px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-semibold';
+      div.append(name, a); container.appendChild(div);
     }
-
     function downloadAllFiles() {
-      const links = document.querySelectorAll('#received-files-list a');
-      links.forEach((a, idx) => {
-        setTimeout(() => a.click(), idx * 300);
-      });
+      document.querySelectorAll('#received-files-list a').forEach((a, idx) => setTimeout(() => a.click(), idx * 300));
     }
-
-    function showProgress(show) {
-      document.getElementById('progress-container').classList.toggle('hidden', !show);
-    }
+    function showProgress(show) { document.getElementById('progress-container').classList.toggle('hidden', !show); }
     function updateProgress(pct) {
       document.getElementById('progress-bar').style.width = pct + '%';
       document.getElementById('progress-percent').innerText = pct + '%';
