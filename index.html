@@ -12,7 +12,7 @@
     <div class="text-center mb-6">
       <div class="flex items-center justify-center gap-2">
         <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-1"><span>⚡</span> SwiftShare</h1>
-        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.8</span>
+        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.10</span>
       </div>
       <p class="text-xs text-slate-500 mt-1">100% P2P 초고속 무제한 파일 전송</p>
     </div>
@@ -63,6 +63,15 @@
         <div id="progress-bar" class="bg-indigo-600 h-full w-0 transition-all duration-150"></div>
       </div>
     </div>
+
+    <details id="log-panel" class="mt-4 text-[10px]">
+      <summary class="cursor-pointer text-slate-400">🛠 연결 로그 (문제 발생 시 복사해서 공유)</summary>
+      <div class="flex gap-2 mt-2">
+        <button onclick="copyLog()" class="px-2 py-1 bg-slate-200 rounded text-slate-700">로그 복사</button>
+        <button onclick="clearLog()" class="px-2 py-1 bg-slate-100 rounded text-slate-500">지우기</button>
+      </div>
+      <pre id="log-box" class="mt-2 p-2 bg-slate-900 text-emerald-300 rounded-lg max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono"></pre>
+    </details>
   </div>
 
   <script>
@@ -73,62 +82,163 @@
     const CHUNK_SIZE = 16 * 1024;
     const CONNECT_TIMEOUT_MS = 20000;
 
-    // ▼▼▼ 직접 발급받은 TURN 정보로 교체하세요 (Metered 무료 가입, Cloudflare TURN, 자체 coturn 등) ▼▼▼
-    //   - 3478/UDP가 막힌 망(회사망·일부 LTE)을 위해 443/TCP(가능하면 turns:)를 꼭 포함
+    // ▼▼▼ TURN 설정 (둘 중 하나만 채우면 됨) ▼▼▼
+    // [방법 A] Metered 대시보드의 "TURN Credentials API" 주소 (권장)
+    //   예: 'https://YOURAPP.metered.live/api/v1/turn/credentials?apiKey=YOUR_API_KEY'
+    const TURN_API_URL = '';
+    // [방법 B] 고정 계정 직접 입력 (coturn 등). 443/TCP, turns: 를 꼭 포함
     const TURN_SERVERS = [
-      // { urls: 'turn:YOUR_HOST:80',                     username: 'USER', credential: 'PASS' },
-      // { urls: 'turn:YOUR_HOST:443?transport=tcp',      username: 'USER', credential: 'PASS' },
-      // { urls: 'turns:YOUR_HOST:443?transport=tcp',     username: 'USER', credential: 'PASS' },
+      // { urls: 'turn:YOUR_HOST:80',                 username: 'USER', credential: 'PASS' },
+      // { urls: 'turn:YOUR_HOST:443?transport=tcp',  username: 'USER', credential: 'PASS' },
+      // { urls: 'turns:YOUR_HOST:443?transport=tcp', username: 'USER', credential: 'PASS' },
     ];
     // ▲▲▲
 
     // ?relay=1 을 붙이면 TURN만 사용 → TURN 서버가 살아있는지 단독 테스트
     const FORCE_RELAY = new URLSearchParams(location.search).get('relay') === '1';
 
-    const peerConfig = {
-      config: {
-        iceServers: [
-          { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-          ...TURN_SERVERS
-        ],
-        iceTransportPolicy: FORCE_RELAY ? 'relay' : 'all'
-      }
-    };
+    // ===== 화면 로그 (iPhone에서도 콘솔 없이 확인) =====
+    const T0 = performance.now();
+    const logLines = [];
+    function log(msg) {
+      const line = `+${((performance.now() - T0) / 1000).toFixed(2)}s ${msg}`;
+      logLines.push(line); console.log(line);
+      const box = document.getElementById('log-box');
+      if (box) { box.textContent = logLines.join('\n'); box.scrollTop = box.scrollHeight; }
+    }
+    function copyLog() {
+      const text = logLines.join('\n');
+      (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+        .then(() => alert('로그를 복사했습니다.'))
+        .catch(() => { const r = document.createRange(); r.selectNodeContents(document.getElementById('log-box'));
+          const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); alert('로그를 선택했습니다. 길게 눌러 복사하세요.'); });
+    }
+    function clearLog() { logLines.length = 0; document.getElementById('log-box').textContent = ''; }
+    log('UA: ' + navigator.userAgent);
+    log('APP v1.0.10, relay강제=' + (new URLSearchParams(location.search).get('relay') === '1'));
 
-    // ===== WebRTC 진단: 어느 단계에서 막히는지 화면에 표시 =====
+    // 후보 문자열 요약: 타입/프로토콜/주소종류(IPv4·IPv6·mDNS)
+    function descCandidate(str) {
+      if (!str) return '(end-of-candidates)';
+      const parts = str.replace(/^candidate:/, '').split(' ');
+      const proto = (parts[2] || '').toLowerCase();
+      const addr = parts[4] || '';
+      const typ = (str.match(/ typ (\w+)/) || [])[1] || '?';
+      const tcptype = (str.match(/ tcptype (\w+)/) || [])[1];
+      const fam = addr.endsWith('.local') ? 'mDNS' : addr.includes(':') ? 'IPv6' : 'IPv4';
+      const masked = fam === 'IPv4' ? addr.replace(/\.\d+$/, '.x') : fam === 'IPv6' ? addr.split(':').slice(0, 3).join(':') + ':…' : 'xxxx.local';
+      return `${typ} ${proto}${tcptype ? '/' + tcptype : ''} ${fam} ${masked}:${parts[5] || ''}`;
+    }
+
+    let cachedTurn = null;
+    async function getPeerConfig() {
+      let turn = TURN_SERVERS;
+      if (TURN_API_URL) {
+        if (!cachedTurn) {
+          try {
+            const res = await fetch(TURN_API_URL);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            cachedTurn = await res.json();
+          } catch (e) {
+            console.warn('TURN 자격증명 조회 실패', e);
+            cachedTurn = null;
+          }
+        }
+        if (cachedTurn) turn = cachedTurn;
+      }
+      log(`TURN 서버 ${turn.length}개 사용`);
+      return {
+        config: {
+          iceServers: [
+            { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+            ...turn
+          ],
+          iceTransportPolicy: FORCE_RELAY ? 'relay' : 'all'
+        },
+        debug: 2,
+        logFunction: (level, ...rest) => log('[peerjs] ' + rest.map(x => (x && x.message) || (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(' ')),
+        _turnCount: turn.length
+      };
+    }
+    function turnNotice(cfg) {
+      return cfg._turnCount ? '' : ' (⚠️ TURN 미설정)';
+    }
+
+    // ===== WebRTC 진단: 어느 단계에서 막히는지 화면 + 로그에 표시 =====
+    async function dumpPairs(pc, tag) {
+      try {
+        const stats = await pc.getStats();
+        const cands = {};
+        stats.forEach(r => { if (r.type === 'local-candidate' || r.type === 'remote-candidate') cands[r.id] = r; });
+        let n = 0;
+        stats.forEach(r => {
+          if (r.type !== 'candidate-pair') return;
+          n++;
+          const L = cands[r.localCandidateId] || {}, R = cands[r.remoteCandidateId] || {};
+          const fam = (c) => (c.address || c.ip || '').includes(':') ? 'v6' : ((c.address || c.ip || '').endsWith('.local') ? 'mdns' : 'v4');
+          log(`  [${tag}] pair ${r.state}${r.nominated ? '*' : ''} L=${L.candidateType}/${L.protocol}/${fam(L)} → R=${R.candidateType}/${R.protocol}/${fam(R)} req=${r.requestsSent||0} resp=${r.responsesReceived||0} rx_req=${r.requestsReceived||0}`);
+        });
+        if (!n) log(`  [${tag}] candidate-pair 없음 (원격 후보를 못 받았을 수 있음)`);
+      } catch (e) { log('getStats 실패: ' + e); }
+    }
+
     function attachDiagnostics(c, debugEl, statusEl, side) {
       const pc = c.peerConnection;
-      if (!pc) { debugEl.innerText = 'pc 없음'; return () => {}; }
+      if (!pc) { debugEl.innerText = 'pc 없음'; log(side + ': peerConnection 없음'); return () => {}; }
+      log(`${side}: 연결 객체 생성 (peer=${c.peer}, serialization=${c.serialization})`);
       const counts = { host: 0, srflx: 0, relay: 0, prflx: 0 };
+      let remoteCount = 0;
       const render = () => {
         debugEl.innerText =
           `ICE:${pc.iceConnectionState} · 수집:${pc.iceGatheringState} · ` +
-          `host ${counts.host} / srflx ${counts.srflx} / relay ${counts.relay}` +
+          `host ${counts.host} / srflx ${counts.srflx} / relay ${counts.relay} · 원격 ${remoteCount}` +
           (FORCE_RELAY ? ' · [relay 강제]' : '');
       };
-      // PeerJS가 on* 핸들러를 쓰므로 덮어쓰지 않고 addEventListener 사용
+
+      // 원격 후보 수신 로그 (PeerJS가 호출하는 addIceCandidate를 감쌈)
+      const origAdd = pc.addIceCandidate.bind(pc);
+      pc.addIceCandidate = (cand, ...rest) => {
+        remoteCount++;
+        log(`${side}: 원격 후보 ← ${descCandidate(cand && cand.candidate)}`);
+        render();
+        return origAdd(cand, ...rest).catch(e => { log(`${side}: addIceCandidate 실패 ${e}`); throw e; });
+      };
+
       pc.addEventListener('icecandidate', (e) => {
-        if (e.candidate && e.candidate.candidate) {
-          const m = e.candidate.candidate.match(/ typ (\w+)/);
+        const str = e.candidate && e.candidate.candidate;
+        if (str) {
+          const m = str.match(/ typ (\w+)/);
           if (m && counts[m[1]] !== undefined) counts[m[1]]++;
         }
+        log(`${side}: 로컬 후보 → ${descCandidate(str)}`);
         render();
       });
-      pc.addEventListener('icegatheringstatechange', render);
+      pc.addEventListener('icecandidateerror', (e) => log(`${side}: 후보 오류 ${e.url || ''} ${e.errorCode} ${e.errorText || ''}`));
+      pc.addEventListener('signalingstatechange', () => log(`${side}: signaling=${pc.signalingState}`));
+      pc.addEventListener('icegatheringstatechange', () => { log(`${side}: gathering=${pc.iceGatheringState}`); render(); });
+      pc.addEventListener('connectionstatechange', () => log(`${side}: connection=${pc.connectionState}`));
       pc.addEventListener('iceconnectionstatechange', () => {
+        log(`${side}: ICE=${pc.iceConnectionState}`);
         render();
+        if (['connected', 'failed', 'disconnected'].includes(pc.iceConnectionState)) dumpPairs(pc, side + ':' + pc.iceConnectionState);
         if (pc.iceConnectionState === 'failed') {
           statusEl.innerText = counts.relay === 0
-            ? '❌ P2P 경로 실패 (TURN 후보 0개) — TURN 서버 설정이 필요합니다.'
-            : '❌ P2P 경로 실패 — 네트워크(방화벽)를 확인하세요.';
+            ? '❌ P2P 경로 실패 (TURN 후보 0개) — 아래 연결 로그를 복사해 주세요.'
+            : '❌ P2P 경로 실패 — 아래 연결 로그를 복사해 주세요.';
         }
       });
+      pc.addEventListener('datachannel', (e) => log(`${side}: 원격 datachannel 수신 label=${e.channel.label}`));
       render();
+
+      c.on('open', () => log(`${side}: ✅ DataConnection open`));
+      c.on('close', () => log(`${side}: DataConnection close`));
+      c.on('error', (err) => log(`${side}: DataConnection error ${err && err.type} ${err && err.message}`));
 
       const timer = setTimeout(() => {
         if (!c.open) {
-          statusEl.innerText = `⌛ ${CONNECT_TIMEOUT_MS / 1000}초 내 통로 생성 실패 (ICE: ${pc.iceConnectionState}). ` +
-            (counts.relay === 0 ? 'TURN 후보가 없습니다.' : '방화벽/NAT 문제일 수 있습니다.');
+          log(`${side}: ⌛ 타임아웃 ICE=${pc.iceConnectionState} conn=${pc.connectionState} dc=${c.dataChannel ? c.dataChannel.readyState : '없음'}`);
+          dumpPairs(pc, side + ':timeout');
+          statusEl.innerText = `⌛ ${CONNECT_TIMEOUT_MS / 1000}초 내 통로 생성 실패 (ICE: ${pc.iceConnectionState}). 아래 연결 로그를 복사해 주세요.`;
         }
       }, CONNECT_TIMEOUT_MS);
       return () => clearTimeout(timer);
@@ -167,7 +277,7 @@
       });
     }
 
-    function initSender() {
+    async function initSender() {
       if (peer) peer.destroy();
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       document.getElementById('send-code').innerText = code;
@@ -176,8 +286,9 @@
       const debugEl = document.getElementById('send-debug');
       statusEl.innerText = '⏳ 연결 코드 등록 중...'; debugEl.innerText = '';
 
-      peer = new Peer('swift-' + code, peerConfig);
-      peer.on('open', () => { statusEl.innerText = '✅ 대기 중! 받는 기기에서 코드를 입력하세요.'; });
+      const cfg = await getPeerConfig();
+      peer = new Peer('swift-' + code, cfg);
+      peer.on('open', () => { statusEl.innerText = '✅ 대기 중! 받는 기기에서 코드를 입력하세요.' + turnNotice(cfg); });
 
       peer.on('connection', (c) => {
         conn = c;
@@ -241,19 +352,20 @@
       showProgress(false); fileInput.value = '';
     }
 
-    function connectAndReceive() {
+    async function connectAndReceive() {
       const code = document.getElementById('receive-code').value.trim();
       if (code.length !== 6) return alert('6자리 숫자를 입력하세요.');
       if (peer) peer.destroy();
-      peer = new Peer(peerConfig);
-
       const statusEl = document.getElementById('receive-status');
       const debugEl = document.getElementById('receive-debug');
       document.getElementById('receive-status-container').classList.remove('hidden');
       statusEl.innerText = '📡 서버 연결 중...'; debugEl.innerText = '';
 
+      const cfg = await getPeerConfig();
+      peer = new Peer(cfg);
+
       peer.on('open', () => {
-        statusEl.innerText = '🔎 보내는 기기 연결 시도 중...';
+        statusEl.innerText = '🔎 보내는 기기 연결 시도 중...' + turnNotice(cfg);
         conn = peer.connect('swift-' + code, { serialization: 'json', reliable: true });
         const stopTimer = attachDiagnostics(conn, debugEl, statusEl, 'recv');
 
