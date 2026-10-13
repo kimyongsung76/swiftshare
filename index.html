@@ -12,7 +12,7 @@
     <div class="text-center mb-6">
       <div class="flex items-center justify-center gap-2">
         <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-1"><span>⚡</span> SwiftShare</h1>
-        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.11</span>
+        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.12</span>
       </div>
       <p class="text-xs text-slate-500 mt-1">100% P2P 초고속 무제한 파일 전송</p>
     </div>
@@ -83,7 +83,8 @@
     let conn = null;
     let selectedFiles = [];
     let receivedBlobs = [];
-    const CHUNK_SIZE = 16 * 1024;
+    const CHUNK_SIZE = 64 * 1024;        // raw 바이너리 전송 (base64/JSON 제거)
+    const MAX_BUFFERED = 1024 * 1024;     // 송신 버퍼 상한
     const CONNECT_TIMEOUT_MS = 20000;
 
     // ▼▼▼ TURN 설정 (둘 중 하나만 채우면 됨) ▼▼▼
@@ -119,7 +120,7 @@
     }
     function clearLog() { logLines.length = 0; document.getElementById('log-box').textContent = ''; }
     log('UA: ' + navigator.userAgent);
-    log('APP v1.0.11, relay강제=' + (new URLSearchParams(location.search).get('relay') === '1'));
+    log('APP v1.0.12, relay강제=' + (new URLSearchParams(location.search).get('relay') === '1'));
 
     // 후보 문자열 요약: 타입/프로토콜/주소종류(IPv4·IPv6·mDNS)
     function descCandidate(str) {
@@ -139,6 +140,9 @@
     // 회사 Wi-Fi처럼 mDNS(멀티캐스트)가 막힌 망에선 이 이름을 상대가 못 풀어 같은 망끼리 연결 실패.
     // 마이크 권한을 받는 동안에는 실제 내부 IP(192.168.x.x 등)가 후보로 노출됨.
     let compatStream = null;
+    // iOS(WebKit)는 내부 IP를 항상 mDNS로 숨기므로 기본으로 켬
+    const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (IS_IOS) document.getElementById('compat-mode').checked = true;
     async function ensureCompat() {
       const on = document.getElementById('compat-mode').checked;
       log('호환 모드=' + on);
@@ -335,37 +339,46 @@
       peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
     }
 
-    function arrayBufferToBase64(buffer) {
-      const bytes = new Uint8Array(buffer); let binary = '';
-      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-      return btoa(binary);
-    }
-    function base64ToArrayBuffer(base64) {
-      const s = atob(base64); const bytes = new Uint8Array(s.length);
-      for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
-      return bytes.buffer;
+    function sendCtrl(obj) { conn.send(JSON.stringify(obj)); }
+
+    async function waitDrain() {
+      const dc = conn.dataChannel;
+      while (dc && dc.readyState === 'open' && dc.bufferedAmount > MAX_BUFFERED) {
+        await new Promise(r => setTimeout(r, 5));
+      }
+      if (!dc || dc.readyState !== 'open') throw new Error('채널이 닫혔습니다');
     }
 
     async function sendFilesSequential() {
       showProgress(true);
-      conn.send({ type: 'HEADER', count: selectedFiles.length });
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const file = selectedFiles[i];
-        document.getElementById('progress-title').innerText = `[${i+1}/${selectedFiles.length}] ${file.name}`;
-        conn.send({ type: 'FILE_START', name: file.name, size: file.size, mime: file.type });
-        let offset = 0;
-        while (offset < file.size) {
-          const buffer = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
-          conn.send({ type: 'CHUNK', data: arrayBufferToBase64(buffer) });
-          offset += CHUNK_SIZE;
-          updateProgress(Math.min(100, Math.round((offset / file.size) * 100)));
-          while (conn.dataChannel && conn.dataChannel.bufferedAmount > 256 * 1024) {
-            await new Promise(r => setTimeout(r, 10));
+      // 상대 브라우저가 허용하는 최대 메시지 크기에 맞춤 (Safari 대비)
+      const pc = conn.peerConnection;
+      const maxMsg = (pc && pc.sctp && pc.sctp.maxMessageSize) || 65536;
+      const chunkSize = Math.min(CHUNK_SIZE, maxMsg);
+      log(`send: 청크 크기 ${chunkSize} bytes (상대 최대 ${maxMsg})`);
+      try {
+        sendCtrl({ type: 'HEADER', count: selectedFiles.length });
+        for (let i = 0; i < selectedFiles.length; i++) {
+          const file = selectedFiles[i];
+          document.getElementById('progress-title').innerText = `[${i+1}/${selectedFiles.length}] ${file.name}`;
+          sendCtrl({ type: 'FILE_START', name: file.name, size: file.size, mime: file.type });
+          let offset = 0;
+          while (offset < file.size) {
+            const buffer = await file.slice(offset, offset + chunkSize).arrayBuffer();
+            await waitDrain();
+            conn.send(buffer);
+            offset += buffer.byteLength;
+            updateProgress(Math.min(100, Math.round((offset / file.size) * 100)));
           }
+          await waitDrain();
+          sendCtrl({ type: 'FILE_END' });
+          log(`send: ${file.name} 전송 완료 (${file.size} bytes)`);
         }
-        conn.send({ type: 'FILE_END' });
+        document.getElementById('send-status').innerText = '🎉 모든 파일 전송 완료!';
+      } catch (e) {
+        log('send: 전송 중단 ' + e.message);
+        document.getElementById('send-status').innerText = '❌ 전송 중 연결이 끊겼습니다. 다시 시도하세요.';
       }
-      document.getElementById('send-status').innerText = '🎉 모든 파일 전송 완료!';
       document.getElementById('btn-reset-send').classList.remove('hidden');
     }
 
@@ -395,30 +408,36 @@
 
       peer.on('open', () => {
         statusEl.innerText = '🔎 보내는 기기 연결 시도 중...' + turnNotice(cfg);
-        conn = peer.connect('swift-' + code, { serialization: 'json', reliable: true });
+        conn = peer.connect('swift-' + code, { serialization: 'raw', reliable: true });
         const stopTimer = attachDiagnostics(conn, debugEl, statusEl, 'recv');
 
         conn.on('open', () => { stopTimer(); setTimeout(releaseCompat, 3000); statusEl.innerText = '⚡ 연결 성공! 파일 수신 시작...'; showProgress(true); });
 
         let currentFile = null, fileChunks = [], receivedBytes = 0, fileCount = 0;
         conn.on('data', (data) => {
-          if (data.type === 'HEADER') { fileCount = data.count; receivedBlobs = []; }
-          else if (data.type === 'FILE_START') {
-            currentFile = data; fileChunks = []; receivedBytes = 0;
-            document.getElementById('progress-title').innerText = `수신 중: ${data.name}`;
-          } else if (data.type === 'CHUNK') {
-            const buffer = base64ToArrayBuffer(data.data);
-            fileChunks.push(buffer); receivedBytes += buffer.byteLength;
-            if (currentFile && currentFile.size) updateProgress(Math.min(100, Math.round((receivedBytes / currentFile.size) * 100)));
-          } else if (data.type === 'FILE_END') {
-            const blob = new Blob(fileChunks, { type: currentFile.mime || 'application/octet-stream' });
-            receivedBlobs.push({ name: currentFile.name, blob });
-            addReceivedFileUI(currentFile.name, blob);
-            if (receivedBlobs.length === fileCount) {
-              statusEl.innerText = '🎉 모든 파일 수신 완료!';
-              document.getElementById('btn-download-all').classList.remove('hidden');
+          // 문자열 = 제어 메시지(JSON), 그 외 = 파일 바이너리 조각
+          if (typeof data === 'string') {
+            let msg; try { msg = JSON.parse(data); } catch { return; }
+            if (msg.type === 'HEADER') { fileCount = msg.count; receivedBlobs = []; }
+            else if (msg.type === 'FILE_START') {
+              currentFile = msg; fileChunks = []; receivedBytes = 0;
+              document.getElementById('progress-title').innerText = `수신 중: ${msg.name}`;
+            } else if (msg.type === 'FILE_END') {
+              const blob = new Blob(fileChunks, { type: currentFile.mime || 'application/octet-stream' });
+              log(`recv: ${currentFile.name} 수신 ${receivedBytes}/${currentFile.size} bytes`);
+              receivedBlobs.push({ name: currentFile.name, blob });
+              addReceivedFileUI(currentFile.name, blob);
+              fileChunks = [];
+              if (receivedBlobs.length === fileCount) {
+                statusEl.innerText = '🎉 모든 파일 수신 완료!';
+                document.getElementById('btn-download-all').classList.remove('hidden');
+              }
             }
+            return;
           }
+          const size = data.byteLength !== undefined ? data.byteLength : data.size; // ArrayBuffer 또는 Blob
+          fileChunks.push(data); receivedBytes += size;
+          if (currentFile && currentFile.size) updateProgress(Math.min(100, Math.round((receivedBytes / currentFile.size) * 100)));
         });
         conn.on('error', (err) => { statusEl.innerText = '❌ 연결 오류: ' + (err && err.type || err); });
       });
