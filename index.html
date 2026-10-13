@@ -12,7 +12,7 @@
     <div class="text-center mb-6">
       <div class="flex items-center justify-center gap-2">
         <h1 class="text-2xl font-bold text-indigo-600 flex items-center gap-1"><span>⚡</span> SwiftShare</h1>
-        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.10</span>
+        <span class="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full font-mono">v1.0.11</span>
       </div>
       <p class="text-xs text-slate-500 mt-1">100% P2P 초고속 무제한 파일 전송</p>
     </div>
@@ -21,6 +21,10 @@
       <button id="tab-send" onclick="switchMode('send')" class="flex-1 py-2 font-medium rounded-lg text-sm transition bg-white text-indigo-600 shadow-sm">보내기</button>
       <button id="tab-receive" onclick="switchMode('receive')" class="flex-1 py-2 font-medium rounded-lg text-sm transition text-slate-500">받기</button>
     </div>
+    <label class="flex items-start gap-2 text-[11px] text-slate-500 -mt-3 mb-5 cursor-pointer">
+      <input type="checkbox" id="compat-mode" class="mt-0.5">
+      <span><b>같은 망 호환 모드</b> — 마이크 권한을 받아 브라우저가 실제 내부 IP로 연결하게 합니다 (녹음은 하지 않음). 같은 Wi-Fi에서 아이폰 연결이 안 될 때 <b>양쪽 모두</b> 켜세요.</span>
+    </label>
 
     <!-- Send -->
     <div id="section-send">
@@ -115,7 +119,7 @@
     }
     function clearLog() { logLines.length = 0; document.getElementById('log-box').textContent = ''; }
     log('UA: ' + navigator.userAgent);
-    log('APP v1.0.10, relay강제=' + (new URLSearchParams(location.search).get('relay') === '1'));
+    log('APP v1.0.11, relay강제=' + (new URLSearchParams(location.search).get('relay') === '1'));
 
     // 후보 문자열 요약: 타입/프로토콜/주소종류(IPv4·IPv6·mDNS)
     function descCandidate(str) {
@@ -128,6 +132,28 @@
       const fam = addr.endsWith('.local') ? 'mDNS' : addr.includes(':') ? 'IPv6' : 'IPv4';
       const masked = fam === 'IPv4' ? addr.replace(/\.\d+$/, '.x') : fam === 'IPv6' ? addr.split(':').slice(0, 3).join(':') + ':…' : 'xxxx.local';
       return `${typ} ${proto}${tcptype ? '/' + tcptype : ''} ${fam} ${masked}:${parts[5] || ''}`;
+    }
+
+    // ===== 같은 망 호환 모드 =====
+    // 브라우저는 미디어 권한이 없으면 내부 IP를 xxxx.local(mDNS)로 숨김.
+    // 회사 Wi-Fi처럼 mDNS(멀티캐스트)가 막힌 망에선 이 이름을 상대가 못 풀어 같은 망끼리 연결 실패.
+    // 마이크 권한을 받는 동안에는 실제 내부 IP(192.168.x.x 등)가 후보로 노출됨.
+    let compatStream = null;
+    async function ensureCompat() {
+      const on = document.getElementById('compat-mode').checked;
+      log('호환 모드=' + on);
+      if (!on || compatStream) return;
+      try {
+        compatStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        compatStream.getTracks().forEach(t => t.enabled = false); // 소리는 쓰지 않음
+        log('호환 모드: 마이크 권한 허용 → 실제 내부 IP 후보 사용');
+      } catch (e) {
+        log('호환 모드: 마이크 권한 실패 ' + e.name);
+        alert('마이크 권한이 거부되어 호환 모드를 쓸 수 없습니다.');
+      }
+    }
+    function releaseCompat() {
+      if (compatStream) { compatStream.getTracks().forEach(t => t.stop()); compatStream = null; log('호환 모드: 마이크 해제'); }
     }
 
     let cachedTurn = null;
@@ -286,6 +312,7 @@
       const debugEl = document.getElementById('send-debug');
       statusEl.innerText = '⏳ 연결 코드 등록 중...'; debugEl.innerText = '';
 
+      await ensureCompat();
       const cfg = await getPeerConfig();
       peer = new Peer('swift-' + code, cfg);
       peer.on('open', () => { statusEl.innerText = '✅ 대기 중! 받는 기기에서 코드를 입력하세요.' + turnNotice(cfg); });
@@ -295,7 +322,7 @@
         statusEl.innerText = '🔗 상대방 접속! 통로 생성 중...';
         const stopTimer = attachDiagnostics(c, debugEl, statusEl, 'send');
         c.on('open', () => {
-          stopTimer();
+          stopTimer(); setTimeout(releaseCompat, 3000);
           statusEl.innerText = '⚡ 통로 연결 성공! 파일 전송 시작...';
           sendFilesSequential();
         });
@@ -343,6 +370,7 @@
     }
 
     function resetSend() {
+      releaseCompat();
       if (peer) peer.destroy();
       selectedFiles = [];
       document.getElementById('file-list').innerHTML = '';
@@ -361,6 +389,7 @@
       document.getElementById('receive-status-container').classList.remove('hidden');
       statusEl.innerText = '📡 서버 연결 중...'; debugEl.innerText = '';
 
+      await ensureCompat();
       const cfg = await getPeerConfig();
       peer = new Peer(cfg);
 
@@ -369,7 +398,7 @@
         conn = peer.connect('swift-' + code, { serialization: 'json', reliable: true });
         const stopTimer = attachDiagnostics(conn, debugEl, statusEl, 'recv');
 
-        conn.on('open', () => { stopTimer(); statusEl.innerText = '⚡ 연결 성공! 파일 수신 시작...'; showProgress(true); });
+        conn.on('open', () => { stopTimer(); setTimeout(releaseCompat, 3000); statusEl.innerText = '⚡ 연결 성공! 파일 수신 시작...'; showProgress(true); });
 
         let currentFile = null, fileChunks = [], receivedBytes = 0, fileCount = 0;
         conn.on('data', (data) => {
